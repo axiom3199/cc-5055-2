@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Viewer {{ name }}{% endblock %}
+{% block content %}
+<h2 style="margin-top:0"><a href="{{ url_for('run_overview', name=name) }}">← {{ name }}</a> — per-frame viewer</h2>
+<div class="card">
+  <div style="display:flex; align-items:center; gap:14px; margin-bottom:10px">
+    <input id="slider" type="range" min="0" max="{{ n_frames-1 }}" value="0" style="flex:1">
+    <span id="fnum" style="min-width:40px">0</span>
+    <span id="fstatus" class="pill"></span>
+  </div>
+  <div style="text-align:center">
+    <img id="fimg" src="{{ url_for('frame_image', name=name, idx=0) }}"
+         style="max-width:100%; background:#000; border-radius:4px">
+  </div>
+  <p class="muted">Overlay: <span style="color:#3cff78">●</span> triangulated map point,
+    <span style="color:#ffaa00">●</span> inherited-depth point,
+    <span style="color:#ff2828">●</span> rejected outlier,
+    <span style="color:#ff5028">■</span> virtual marker. The overlay is drawn directly from the
+    solved geometry — no camera-curve smoothing.</p>
+</div>
+<script>
+const slider = document.getElementById("slider");
+const img = document.getElementById("fimg");
+const fnum = document.getElementById("fnum");
+const fstatus = document.getElementById("fstatus");
+async function show(i) {
+  fnum.textContent = i;
+  img.src = "{{ url_for('frame_image', name=name, idx=0) }}".replace(/0$/, i);
+  const r = await fetch("{{ url_for('frame_info', name=name, idx=0) }}".replace(/0$/, i));
+  const j = await r.json();
+  let txt = j.solved ? (j.method||"") : "unsolved";
+  if (j.rotation_only) txt += " · ROTATION-ONLY";
+  fstatus.textContent = txt;
+  fstatus.className = "pill" + (j.rotation_only ? " rot" : (j.solved ? " ok" : ""));
+}
+slider.addEventListener("input", e => show(+e.target.value));
+show(0);
+</script>
+{% endblock %}

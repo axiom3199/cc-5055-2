@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h3>New run</h3>
+  <form method="post" action="{{ url_for('create_run') }}">
+    <div class="grid">
+      <div>
+        <label>run name</label>
+        <input name="name" required placeholder="e.g. survey_a">
+        <label>footage profile</label>
+        <select name="profile">
+          <option value="survey">survey (translation + pure-rotation segments)</option>
+          <option value="translate_only">translate_only (no rotation segments)</option>
+        </select>
+      </div>
+      <div>
+        <label>frames</label>
+        <input name="n_frames" type="number" value="100">
+        <label>seed</label>
+        <input name="seed" type="number" value="7">
+        <label>wrong-match ratio (robustness test)</label>
+        <input name="outlier_ratio" type="number" step="0.01" value="0.0" min="0" max="0.5">
+        <label>triangulation strategy</label>
+        <select name="strategy">
+          <option value="delayed">delayed (wait for parallax)</option>
+          <option value="inherited">inherited (immediate depth guess)</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:12px"><input type="submit" value="Create run"></div>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Runs</h3>
+  {% if runs %}
+  <table>
+    <tr><th>name</th><th>profile</th><th>strategy</th><th>outliers</th><th>status</th><th></th></tr>
+    {% for r in runs %}
+    <tr>
+      <td><a href="{{ url_for('run_overview', name=r.name) }}">{{ r.name }}</a></td>
+      <td>{{ r.config.get('profile','?') }}</td>
+      <td>{{ r.config.get('strategy','?') }}</td>
+      <td>{{ r.config.get('outlier_ratio',0) }}</td>
+      <td><span class="pill">{{ r.status }}</span></td>
+      <td>
+        <a href="{{ url_for('viewer', name=r.name) }}">viewer</a> ·
+        <a href="{{ url_for('tracks_page', name=r.name) }}">tracks</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No runs yet. Create one above.</p>
+  {% endif %}
+</div>
+{% endblock %}

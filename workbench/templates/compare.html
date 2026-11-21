@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Strategy comparison{% endblock %}
+{% block content %}
+<h2 style="margin-top:0">Delayed triangulation vs inherited depth</h2>
+<p class="muted" style="max-width:820px">
+During a pure-rotation segment no parallax exists, so a feature born there cannot be
+triangulated. <b>Delayed</b> waits for parallax and triangulates honestly (deferring — no
+estimate — if rotation persists to the track's end). <b>Inherited</b> immediately assigns the
+median depth of neighbouring map points: an unconstrained guess. Both strategies share the
+same camera trajectory here (inherited points are excluded from PnP and bundle adjustment),
+so the comparison isolates the depth strategy's effect on ground contact.
+</p>
+
+{% if not res %}
+<div class="card">
+  <p>No comparison computed yet. Run the pipeline on a base run named <code>cmp_src</code>,
+  then solve both strategies:</p>
+  <form method="post" action="{{ url_for('compare_run') }}">
+    <label>base run (must be solved or tracked)</label>
+    <input name="base" value="cmp_src">
+    <div style="margin-top:8px"><input type="submit" value="Solve both strategies"></div>
+  </form>
+</div>
+{% else %}
+<div class="card">
+  <img class="plot" src="{{ url_for('compare_plot') }}" style="width:100%">
+</div>
+<div class="grid">
+  {% for strat in ["delayed","inherited"] %}
+  {% set m = res[strat] %}
+  <div class="card">
+    <h3>{{ strat }}</h3>
+    <div class="metric"><div class="v">{{ "%.3f"|format(m.cameras.pos_rmse_m) }} m</div><div class="k">pos RMSE</div></div>
+    <div class="metric"><div class="v">{{ "%.3f"|format(m.cameras.rot_rmse_deg) }}°</div><div class="k">rot RMSE</div></div>
+    {% set gc = m.ground_contact %}
+    <table style="margin-top:10px">
+      <tr><td>rotation-born ground tracks</td><td>{{ gc.n_ground_tracks_born_in_rotation }}</td></tr>
+      <tr><td>deferred (no estimate)</td><td>{{ gc.n_deferred_no_estimate }}</td></tr>
+      <tr><td>estimated</td><td>{{ gc.n_estimated }}</td></tr>
+      <tr><td>median |z err|</td><td>{{ "%.3f"|format(gc.median_abs_z_err_m) }} m</td></tr>
+      <tr><td>p90 |z err|</td><td>{{ "%.3f"|format(gc.p90_abs_z_err_m) }} m</td></tr>
+    </table>
+  </div>
+  {% endfor %}
+</div>
+<div class="card">
+  <h3>Reading the result</h3>
+  <p class="muted">
+  <b>Delayed</b> is honest about ignorance: it reports "no estimate" for most rotation-born
+  ground tracks rather than fabricating a position. <b>Inherited</b> always has an answer, but
+  it is borrowed from neighbours, not measured — on a flat ground plane the guess can look
+  plausible, yet it carries no parallax evidence and would mislead any virtual object placed
+  from it. If inherited points were allowed into the optimization, their unconstrained depth would
+  also corrupt the shared cameras.
+  </p>
+</div>
+{% endif %}
+{% endblock %}

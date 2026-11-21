@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Tracks {{ name }}{% endblock %}
+{% block content %}
+<h2 style="margin-top:0"><a href="{{ url_for('run_overview', name=name) }}">← {{ name }}</a> — track quality</h2>
+<div class="card">
+  <div class="metric"><div class="v">{{ n_tracks }}</div><div class="k">tracks</div></div>
+  <div class="metric"><div class="v">{{ n_frames }}</div><div class="k">frames</div></div>
+  {% if n_injected %}<div class="metric"><div class="v" style="color:#ff9a9a">{{ n_injected }}</div><div class="k">injected wrong matches</div></div>{% endif %}
+  <p class="muted">Tracks are retired after a randomized lifetime (jittered to avoid a
+  synchronized map collapse) to bound KLT drift, then respawn as new tracks. The lifetime
+  must exceed the longest pure-rotation segment, or no landmark bridges the segment and the
+  two translation sides drift apart in scale.</p>
+  <img class="plot" src="{{ url_for('tracks_plot', name=name) }}" style="width:100%">
+</div>
+{% endblock %}

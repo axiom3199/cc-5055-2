@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}Camera Motion Workbench{% endblock %}</title>
+  <style>
+    body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; margin: 0;
+           background: #1b1e23; color: #dfe3e8; }
+    a { color: #6db3f2; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    header { background: #23272e; padding: 10px 20px; border-bottom: 1px solid #333;
+             display: flex; align-items: baseline; gap: 18px; }
+    header h1 { font-size: 17px; margin: 0; font-weight: 600; }
+    header nav a { margin-right: 14px; font-size: 13px; }
+    main { padding: 18px 22px; max-width: 1100px; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #2c313a; }
+    th { color: #9aa4b0; font-weight: 600; }
+    .card { background: #23272e; border: 1px solid #2f3540; border-radius: 6px;
+            padding: 14px 16px; margin-bottom: 16px; }
+    .card h3 { margin: 0 0 10px; font-size: 14px; }
+    .warn { background: #4a2f16; border: 1px solid #8a5a1e; color: #ffce8a;
+            padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 13px; }
+    .ok { background: #16351f; border: 1px solid #2c5c39; color: #9fe0b4;
+          padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 13px; }
+    .metric { display: inline-block; margin: 4px 18px 4px 0; }
+    .metric .v { font-size: 20px; font-weight: 600; }
+    .metric .k { font-size: 11px; color: #9aa4b0; }
+    button, input[type=submit] { background: #2f6db3; color: #fff; border: 0;
+          padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+    button:hover { background: #3a7cc4; }
+    input, select { background: #1b1e23; color: #dfe3e8;
+          border: 1px solid #3a4150; border-radius: 4px; padding: 5px 8px; font-size: 13px; }
+    label { font-size: 12px; color: #9aa4b0; display: block; margin: 8px 0 2px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    img.plot { max-width: 100%; background: #fff; border-radius: 4px; }
+    .muted { color: #8a929c; font-size: 12px; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 10px;
+            font-size: 11px; background: #2c313a; }
+    .pill.rot { background: #4a1f1f; color: #ff9a9a; }
+    .pill.ok { background: #16351f; color: #9fe0b4; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>📷 Camera Motion Workbench</h1>
+  <nav>
+    <a href="{{ url_for('index') }}">Runs</a>
+    <a href="{{ url_for('compare') }}">Strategy comparison</a>
+  </nav>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>
