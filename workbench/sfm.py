@@ -7,6 +7,13 @@ global bundle adjustment with robust loss and outlier rejection.
 
 The raw solution is up-to-scale: no metric claims are made until an external
 scale constraint is applied (see align.py).
+
+Entry points:
+  solve_graph(view, ...)  the camera observation interface: reads an immutable
+                          ObservationView snapshot (obsgraph.py); the solver
+                          never touches the live observation graph.
+  solve(tracks, ...)      compatibility adapter for the old entry; wraps raw
+                          track dicts in a view and calls solve_graph.
 """
 import numpy as np
 import cv2
@@ -14,6 +21,7 @@ import cv2
 from . import geometry as geo
 from .degeneracy import classify_motion
 from .bundle import bundle_adjust
+from .obsgraph import ObservationView, ResidualStore, ObsId
 
 MIN_PARALLAX_INIT = 5.0     # degrees, for the seed pair (near-planar scenes need real baseline)
 MIN_INIT_INLIER_FRAC = 0.5  # cheirality-consistent fraction of matches required
@@ -31,6 +39,7 @@ class Solution:
         self.observations = []   # (pid, frame, x, y)
         self.obs_residual = []   # parallel to observations, filled after BA
         self.obs_outlier = []
+        self.residual_store = None   # ResidualStore keyed by ObsId (evaluation layer)
         self.init_info = {}
         self.ba_info = {}
         self.logs = []
@@ -38,6 +47,23 @@ class Solution:
 
     def log(self, msg):
         self.logs.append(msg)
+
+    def build_residual_store(self):
+        """Key the post-BA residuals by unified observation identity. Strict:
+        every kept observation must carry a residual and an outlier flag."""
+        if not (len(self.observations) == len(self.obs_residual)
+                == len(self.obs_outlier)):
+            raise RuntimeError(
+                f"{len(self.observations)} observations but "
+                f"{len(self.obs_residual)} residuals and "
+                f"{len(self.obs_outlier)} outlier flags: the evaluation "
+                f"layer would be silently incomplete")
+        store = ResidualStore()
+        for (pid, f, _, _), r, o in zip(self.observations, self.obs_residual,
+                                        self.obs_outlier):
+            store.set(ObsId(pid, f), r, o)
+        self.residual_store = store
+        return store
 
 
 def _median_parallax(R, t, p1, p2, K):
@@ -73,6 +99,22 @@ def _shared_matches(tracks, fa, fb):
 
 
 def solve(tracks, n_frames, K, strategy="delayed", ba_max_nfev=100, log=print):
+    """Compatibility adapter for the pre-graph entry point. Wraps the raw
+    track dicts in an ObservationView and delegates to solve_graph; results
+    are identical to calling solve_graph on a graph built from the same
+    tracks."""
+    view = ObservationView.from_track_dicts(tracks, n_frames)
+    return solve_graph(view, K=K, strategy=strategy, ba_max_nfev=ba_max_nfev,
+                       log=log)
+
+
+def solve_graph(view, K, strategy="delayed", ba_max_nfev=100, log=print):
+    """Camera observation interface: solve from an immutable ObservationView
+    snapshot. The live observation graph is never passed in, so the solver
+    cannot modify the UI-visible point set; results reach the graph only
+    through an explicit commit (obsgraph.ObservationGraph.commit_solution)."""
+    tracks = view.tracks()
+    n_frames = view.n_frames
     sol = Solution()
     sol.strategy = strategy
     per_frame = _frame_obs_index(tracks, n_frames)
@@ -392,6 +434,9 @@ def _run_ba(sol, K, max_nfev, log):
     sol.ba_info = {k: v for k, v in info.items() if k != "residuals"}
     res = info.get("residuals")
     if res is None:
+        # BA skipped (no points survived): observations are empty as well, so
+        # the evaluation layer is consistently empty rather than missing.
+        sol.build_residual_store()
         return
     rnorm = np.linalg.norm(res, axis=1)
     keep = rnorm < OUTLIER_REJECT
@@ -400,7 +445,9 @@ def _run_ba(sol, K, max_nfev, log):
         f"> {OUTLIER_REJECT}px")
     if n_rej > 0:
         obs_kept = [o for o, k in zip(sol.observations, keep) if k]
-        sol.obs_outlier = [not k for k in keep]
+        # the survivors are inliers by construction; the rejection count lives
+        # in ba_info["rejected_outliers"], keeping one flag per observation
+        sol.obs_outlier = [False] * len(obs_kept)
         cams, pts, info2 = bundle_adjust(sol.cameras, sol.points, obs_kept, K,
                                          max_nfev=max_nfev)
         sol.cameras, sol.points = cams, pts
@@ -440,3 +487,4 @@ def _run_ba(sol, K, max_nfev, log):
                             "pruned_weak_points": len(weak)})
         log(f"[BA] pass 3: pruned {len(weak)} under-constrained points, "
             f"rms={info3.get('rms_px', float('nan')):.3f}px")
+    sol.build_residual_store()

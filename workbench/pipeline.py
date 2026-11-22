@@ -16,6 +16,8 @@ import numpy as np
 
 from . import synth, tracking, sfm, align, metrics, marker as marker_mod
 from . import geometry as geo
+from .obsgraph import ObservationGraph
+from .anchors import LensProject, LensKind
 
 
 def create_run(root, name, cfg_dict):
@@ -78,9 +80,10 @@ def step_generate(run_dir):
     return sc
 
 
-def step_track(run_dir):
+def step_track(run_dir, max_tracks=600):
     cfg = load_config(run_dir)
-    tracks, n_frames = tracking.build_tracks(os.path.join(run_dir, "video"))
+    tracks, n_frames = tracking.build_tracks(os.path.join(run_dir, "video"),
+                                             max_tracks=max_tracks)
     ratio = float(cfg.get("outlier_ratio", 0.0))
     injected = []
     if ratio > 0:
@@ -119,17 +122,31 @@ def load_tracks(run_dir):
     return out, int(z["n_frames"]), z["injected_outlier"]
 
 
+def load_or_build_graph(run_dir):
+    """The run's observation graph: the persisted one if present (it carries
+    the user's observation deletions and anchors), otherwise built fresh
+    from the raw tracks."""
+    if os.path.exists(os.path.join(run_dir, "obsgraph.npz")):
+        return ObservationGraph.load(run_dir)
+    tracks, n_frames, _ = load_tracks(run_dir)
+    return ObservationGraph.from_tracks(tracks, n_frames)
+
+
 def step_solve(run_dir, strategy=None, ba_max_nfev=100, log=print):
     cfg = load_config(run_dir)
     strategy = strategy or cfg.get("strategy", "delayed")
-    tracks, n_frames, _ = load_tracks(run_dir)
     K, image_size = load_intrinsics(run_dir)
+    graph = load_or_build_graph(run_dir)
     logs = []
     def collect(msg):
         logs.append(msg)
         log(msg)
-    sol = sfm.solve(tracks, n_frames, K, strategy=strategy,
-                    ba_max_nfev=ba_max_nfev, log=collect)
+    # the solver reads an immutable view; its result reaches the graph only
+    # through the explicit commit below - it never mutates the UI point set
+    sol = sfm.solve_graph(graph.view(), K=K, strategy=strategy,
+                          ba_max_nfev=ba_max_nfev, log=collect)
+    graph.commit_solution(sol)
+    graph.save(run_dir)
     save_solution(run_dir, sol, K, image_size, logs)
     set_status(run_dir, f"solved_{strategy}")
     return sol
@@ -194,8 +211,16 @@ def load_solution(run_dir):
     sol.observations = [(int(p), int(f), float(x), float(y)) for p, f, x, y in obs]
     sol.obs_residual = list(z["residual"])
     sol.obs_outlier = list(z["outlier"])
-    tracks, n_frames, injected = load_tracks(run_dir)
-    sol._tracks = {tr["id"]: tr for tr in tracks}
+    sol.build_residual_store()   # strict: raises if a residual is missing
+    if os.path.exists(os.path.join(run_dir, "obsgraph.npz")):
+        # the solution's point ids belong to the graph's tracks (fragments
+        # after a deletion), so join against the graph, not the raw tracks
+        graph = ObservationGraph.load(run_dir)
+        sol._tracks = {t.id: {"id": t.id, "frames": t.frames, "xy": t.xy}
+                       for t in graph.tracks.snapshot()}
+    else:
+        tracks, n_frames, injected = load_tracks(run_dir)
+        sol._tracks = {tr["id"]: tr for tr in tracks}
     return sol, np.asarray(data["K"]), data
 
 
@@ -241,7 +266,33 @@ def step_align(run_dir, dist_pair, dist_meters, ground_ids):
                   "ground constraint. Raw solution remains up-to-scale.")
     with open(os.path.join(run_dir, "display_transform.json"), "w") as fh:
         json.dump(tf, fh, indent=1)
+    # register the constraints as anchors in the observation graph, so both
+    # lens projects (monocular / stereo) share the same ground anchor and the
+    # scale anchor's lifetime is managed by undoable transactions
+    graph = load_or_build_graph(run_dir)
+    edit = graph.begin_edit()
+    edit.stage_anchors(dist_pair=dist_pair, dist_meters=dist_meters,
+                       ground_ids=ground_ids)
+    edit.commit()
+    graph.save(run_dir)
     return tf
+
+
+def step_export_landing_points(run_dir, kind=LensKind.MONOCULAR,
+                               baseline_m=None, baseline_pair=None):
+    """Metric ground-contact ('landing') points for a lens project over this
+    run. Raises MetricSuspendedError when the project has no length reference
+    (e.g. a monocular project whose only distance anchor was deleted); the
+    overlay preview is unaffected by the suspension."""
+    graph = load_or_build_graph(run_dir)
+    sol, K, _ = load_solution(run_dir)
+    project = LensProject(kind, graph, baseline_m=baseline_m,
+                          baseline_pair=baseline_pair)
+    out = project.export_landing_points(sol)
+    out["lens_kind"] = kind
+    with open(os.path.join(run_dir, "landing_points.json"), "w") as fh:
+        json.dump(out, fh, indent=1)
+    return out
 
 
 def load_display_transform(run_dir):

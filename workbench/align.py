@@ -31,22 +31,13 @@ def fit_ground_plane(points_xyz):
     return c, n
 
 
-def compute_display_transform(solution_points, camera_centers, dist_pair, dist_meters,
-                              ground_ids):
-    """solution_points: dict pid -> (3,) raw coordinates.
-    camera_centers: (m,3) raw camera centers (for yaw convention).
-    dist_pair: (pid_a, pid_b); dist_meters: known real distance.
-    ground_ids: list of pids lying on the ground plane.
-    Returns dict with matrix (4x4), scale, and diagnostics.
-    """
-    pa = np.asarray(solution_points[dist_pair[0]], float)
-    pb = np.asarray(solution_points[dist_pair[1]], float)
-    raw_d = float(np.linalg.norm(pa - pb))
-    if raw_d < 1e-12:
-        raise ValueError("distance anchor points coincide in the solution")
-    scale = float(dist_meters) / raw_d
-
-    gnd = np.array([solution_points[i] for i in ground_ids], float)
+def orientation_from_ground(ground_xyz, camera_centers, scale):
+    """Orientation + translation of the display transform for a KNOWN scale:
+    ground normal -> +Z, ground plane -> z=0, yaw fixed by mapping the
+    first->last camera ground-projected direction to +X. Shared by
+    compute_display_transform (scale from a distance anchor) and the lens
+    projects in anchors.py (scale from a stereo baseline)."""
+    gnd = np.asarray(ground_xyz, float)
     centroid, normal = fit_ground_plane(gnd)
     # orient normal so that cameras are on the positive side
     cam_mean = np.asarray(camera_centers, float).mean(axis=0)
@@ -77,6 +68,26 @@ def compute_display_transform(solution_points, camera_centers, dist_pair, dist_m
     # translation: ground centroid -> origin (plane becomes z=0). The transform
     # is X_disp = scale * R_align @ X + t_align, so the scale must be included.
     t_align = -scale * (R_align @ centroid)
+    return R_align, t_align
+
+
+def compute_display_transform(solution_points, camera_centers, dist_pair, dist_meters,
+                              ground_ids):
+    """solution_points: dict pid -> (3,) raw coordinates.
+    camera_centers: (m,3) raw camera centers (for yaw convention).
+    dist_pair: (pid_a, pid_b); dist_meters: known real distance.
+    ground_ids: list of pids lying on the ground plane.
+    Returns dict with matrix (4x4), scale, and diagnostics.
+    """
+    pa = np.asarray(solution_points[dist_pair[0]], float)
+    pb = np.asarray(solution_points[dist_pair[1]], float)
+    raw_d = float(np.linalg.norm(pa - pb))
+    if raw_d < 1e-12:
+        raise ValueError("distance anchor points coincide in the solution")
+    scale = float(dist_meters) / raw_d
+
+    gnd = np.array([solution_points[i] for i in ground_ids], float)
+    R_align, t_align = orientation_from_ground(gnd, camera_centers, scale)
     M = geo.similarity_matrix(scale, R_align, t_align)
     return {
         "matrix": M.tolist(),

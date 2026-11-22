@@ -89,3 +89,17 @@ def robust_run(tmp_path_factory):
 def robust_solution(robust_run):
     sol, K, _ = pipeline.load_solution(robust_run)
     return sol
+
+
+@pytest.fixture(scope="session")
+def small_run(tmp_path_factory):
+    """A 24-frame survey run with a reduced track count, solved once through
+    the current (graph) pipeline. Shared by the refactor-equivalence and UI
+    tests so each does not pay for its own full solve."""
+    root = tmp_path_factory.mktemp("runs_small")
+    run_dir = _make_run(root, "small", profile="survey", n_frames=24)
+    pipeline.step_generate(run_dir)
+    pipeline.step_track(run_dir, max_tracks=350)
+    pipeline.step_solve(run_dir, strategy="delayed", ba_max_nfev=60,
+                        log=lambda m: None)
+    return run_dir

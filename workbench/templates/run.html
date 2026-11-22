@@ -48,6 +48,9 @@
   <div style="margin-top:8px">
     <a href="{{ url_for('viewer', name=name) }}"><button>Per-frame viewer</button></a>
     <a href="{{ url_for('tracks_page', name=name) }}"><button>Track quality</button></a>
+    <form method="post" action="{{ url_for('solve_only', name=name) }}" style="display:inline">
+      <button>Solve cameras</button>
+    </form>
     <form method="post" action="{{ url_for('run_all', name=name) }}" style="display:inline">
       <button>Re-run pipeline</button>
     </form>
@@ -132,6 +135,16 @@
       <div style="margin-top:8px"><input type="submit" value="Place & render"></div>
     </form>
     {% if marker %}<p class="muted">marker at {{ marker.args.center_xy }}, size {{ marker.args.size }}</p>{% endif %}
+  </div>
+  <div class="card">
+    <h3>Metric landing points</h3>
+    <p class="muted">Ground-contact points with units. Export is suspended when
+    the lens project has no length reference (a monocular project whose only
+    distance anchor was deleted); the preview keeps working regardless.</p>
+    <a href="{{ url_for('export_landing', name=name, lens='monocular') }}"><button>Export (monocular)</button></a>
+    {% if transform %}
+    <a href="{{ url_for('export_landing', name=name, lens='stereo', baseline_m=0.12, baseline_pair='0,1') }}"><button>Export (stereo, 0.12 m baseline)</button></a>
+    {% endif %}
   </div>
 </div>
 {% endif %}

@@ -7,6 +7,7 @@
   python -m workbench.cli evaluate RUN
   python -m workbench.cli marker RUN --cx 1.0 --cy 0.5 --size 0.5
   python -m workbench.cli render RUN
+  python -m workbench.cli export-landing RUN [--lens monocular|stereo] [--baseline-m 0.12 --baseline-pair 0,1]
   python -m workbench.cli pipeline RUN                # generate..evaluate in one go
   python -m workbench.cli compare RUN                 # solve both strategies, report
   python -m workbench.cli serve                       # web UI
@@ -101,6 +102,21 @@ def cmd_render(a):
     print(f"[{a.run}] rendered {len(paths)} frames")
 
 
+def cmd_export_landing(a):
+    from .anchors import MetricSuspendedError
+    pair = tuple(int(x) for x in a.baseline_pair.split(",")) if a.baseline_pair else None
+    try:
+        out = pipeline.step_export_landing_points(
+            _run_dir(a.run), kind=a.lens, baseline_m=a.baseline_m,
+            baseline_pair=pair)
+    except MetricSuspendedError as exc:
+        print(f"[{a.run}] metric export SUSPENDED: {exc}")
+        sys.exit(2)
+    print(f"[{a.run}] {len(out['points'])} landing points, units={out['units']}, "
+          f"scale from {out['scale_evidence']} "
+          f"(ground RMS {out['ground_plane_rms_m']:.3f} m)")
+
+
 def cmd_pipeline(a):
     run_dir = _run_dir(a.run)
     if not os.path.exists(os.path.join(run_dir, "config.json")):
@@ -183,6 +199,13 @@ def main(argv=None):
     mk.set_defaults(fn=cmd_marker)
 
     base("render").set_defaults(fn=cmd_render)
+
+    el = base("export-landing")
+    el.add_argument("--lens", default="monocular",
+                    choices=["monocular", "stereo"])
+    el.add_argument("--baseline-m", type=float, default=None)
+    el.add_argument("--baseline-pair", default="")
+    el.set_defaults(fn=cmd_export_landing)
 
     pl = base("pipeline")
     pl.add_argument("--profile", default="survey")

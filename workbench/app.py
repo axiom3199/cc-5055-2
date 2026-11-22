@@ -20,6 +20,8 @@ from flask import (Flask, abort, jsonify, redirect, render_template, request,
 
 from . import pipeline, plots
 from . import marker as marker_mod
+from .obsgraph import StaleEditError, ReidentifyRequired
+from .anchors import LensKind, MetricSuspendedError
 
 RUNS_ROOT = os.environ.get("WORKBENCH_RUNS", os.path.join(os.getcwd(), "runs"))
 os.makedirs(RUNS_ROOT, exist_ok=True)
@@ -137,6 +139,107 @@ def task_status(name):
     t = _task(name)
     st = pipeline.get_status(_run_dir(name))
     return jsonify({"task": t, "status": st})
+
+
+@app.route("/runs/<name>/solve", methods=["POST"])
+def solve_only(name):
+    """Camera-solving control: runs the solver kernel on the current
+    observation graph (including any committed observation deletions).
+    Kernel failures feed back into the solve task status polled by the page."""
+    run_dir = _run_dir(name)
+    cfg = pipeline.load_config(run_dir)
+
+    def job(log):
+        pipeline.step_solve(run_dir, strategy=cfg.get("strategy", "delayed"),
+                            log=log)
+        pipeline.step_evaluate(run_dir)
+    _run_task(name, job)
+    return redirect(url_for("run_overview", name=name))
+
+
+# --------------------------------------------------------------------------
+# observation edits (undoable transactions over the observation graph)
+# --------------------------------------------------------------------------
+@app.route("/runs/<name>/edits")
+def list_edits(name):
+    run_dir = _run_dir(name)
+    graph = pipeline.load_or_build_graph(run_dir)
+    return jsonify({"version": graph.version,
+                    "anchors": graph.anchors.to_dict(),
+                    "edits": [{"id": e["id"], "base_version": e["base_version"],
+                               "version": e["version"], "ops": e["ops"],
+                               "undone": bool(e.get("undone")),
+                               "undo_of": e.get("undo_of")}
+                              for e in graph.edits()]})
+
+
+@app.route("/runs/<name>/edits/delete_track", methods=["POST"])
+def delete_track(name):
+    """Explicit observation-deletion interface. The delete is an undoable
+    transaction; it never goes through the solver or the UI point set."""
+    run_dir = _run_dir(name)
+    graph = pipeline.load_or_build_graph(run_dir)
+    tid = int(request.form["track_id"])
+    edit = graph.begin_edit()
+    edit.delete_track(tid)
+    try:
+        eid = edit.commit()
+    except StaleEditError as exc:
+        abort(409, str(exc))
+    graph.save(run_dir)
+    return jsonify({"edit": eid, "version": graph.version})
+
+
+@app.route("/runs/<name>/edits/delete_scale_anchor", methods=["POST"])
+def delete_scale_anchor(name):
+    run_dir = _run_dir(name)
+    graph = pipeline.load_or_build_graph(run_dir)
+    aid = int(request.form["anchor_id"])
+    edit = graph.begin_edit()
+    edit.delete_scale_anchor(aid)
+    try:
+        eid = edit.commit()
+    except StaleEditError as exc:
+        abort(409, str(exc))
+    graph.save(run_dir)
+    return jsonify({"edit": eid, "version": graph.version})
+
+
+@app.route("/runs/<name>/edits/<int:eid>/undo", methods=["POST"])
+def undo_edit(name, eid):
+    run_dir = _run_dir(name)
+    graph = pipeline.load_or_build_graph(run_dir)
+    try:
+        graph.undo(eid)
+    except ReidentifyRequired as exc:
+        # the track was split and its members no longer identify the original
+        # constraint - the user must re-identify; nothing was bound by name
+        return jsonify({"error": "reidentify_required", "detail": str(exc)}), 409
+    except (ValueError, IndexError) as exc:
+        abort(404, str(exc))
+    graph.save(run_dir)
+    return jsonify({"undone": eid, "version": graph.version})
+
+
+# --------------------------------------------------------------------------
+# metric landing-point export (suspends without a length reference)
+# --------------------------------------------------------------------------
+@app.route("/runs/<name>/export/landing")
+def export_landing(name):
+    run_dir = _run_dir(name)
+    kind = request.args.get("lens", LensKind.MONOCULAR)
+    baseline_m = request.args.get("baseline_m", type=float)
+    pair = request.args.get("baseline_pair", "")
+    baseline_pair = tuple(int(x) for x in pair.split(",") if x.strip()) or None
+    if baseline_pair is not None and len(baseline_pair) != 2:
+        abort(400, "baseline_pair must be two frame indices")
+    try:
+        out = pipeline.step_export_landing_points(
+            run_dir, kind=kind, baseline_m=baseline_m, baseline_pair=baseline_pair)
+    except MetricSuspendedError as exc:
+        # preview keeps working; only the unit-bearing export is suspended
+        return jsonify({"error": "metric_suspended", "detail": str(exc)}), 409
+    return jsonify(out)
 
 
 # --------------------------------------------------------------------------

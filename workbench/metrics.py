@@ -147,6 +147,11 @@ def reprojection_stats(solution):
 
 
 def sol_outlier_count(solution):
+    # rejected observations leave the evaluation layer, so their count is
+    # recorded at rejection time; obs_outlier flags only the surviving
+    # observations and stays aligned with them
+    if "rejected_outliers" in solution.ba_info:
+        return int(solution.ba_info["rejected_outliers"])
     return sum(1 for o in solution.obs_outlier if o)
 
 

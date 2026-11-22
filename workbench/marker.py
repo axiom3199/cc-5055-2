@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from . import geometry as geo
+from .obsgraph import ObsId
 
 
 def make_cube_marker(center_xy, size=0.4, height=None):
@@ -45,11 +46,15 @@ def render_frame_overlay(base_img, solution, frame_idx, K, marker=None,
         return np.asarray(img)
     R, t = solution.cameras[frame_idx]
 
-    # map points visible in this frame
+    # map points visible in this frame; outlier flags come from the residual
+    # layer keyed by unified observation identity (strict lookup - a missing
+    # residual is an error, not a default)
+    res_store = solution.residual_store
     pts2d, cols = [], []
-    for (pid, f, x, y), outl in zip(solution.observations, solution.obs_outlier):
+    for (pid, f, x, y), outl_legacy in zip(solution.observations, solution.obs_outlier):
         if f != frame_idx or pid not in solution.points:
             continue
+        outl = res_store.get(ObsId(pid, f))[1] if res_store is not None else outl_legacy
         Xc = R @ solution.points[pid] + t
         if Xc[2] <= 0.1:
             continue
